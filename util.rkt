@@ -29,8 +29,17 @@
 
 (provide (all-defined-out))
 
+; An experiment wiht Boolector.  It did not solve the ex5 problem 
+; faster than z3.  I tried both Lingeling and cadical as its sat solvers. 
+; 
+; (require rosette/solver/smt/boolector)
+; (current-solver (boolector))
+; (println (current-solver))
+; (output-smt #t)
+
 (define BW 10)
 (current-bitwidth BW)
+
 
 ;; dims: x y z
 (define (create-matrix dims [init (lambda () 0)])
