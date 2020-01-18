@@ -89,6 +89,40 @@
   (define I-cached2 (permute-vector I-cached struct-size
                                     (lambda (i) (?sw-xform i struct-size localId warpSize))))
 
+  (define V I-cached2)
+  (assert (equal? 65 (vector-ref (vector-ref V 0) 1)))
+  (assert (equal? 1  (vector-ref (vector-ref V 0) 2)))
+
+  (assert (equal? 3 (vector-ref (vector-ref V 2) 0)))
+  (assert (equal? 4 (vector-ref (vector-ref V 3) 2)))
+
+  (assert (equal? 38 (vector-ref (vector-ref V 5) 1)))
+  (assert (equal? 10 (vector-ref (vector-ref V 9) 2)))
+
+  (assert (equal? 12 (vector-ref (vector-ref V 11) 0)))
+  (assert (equal? 50 (vector-ref (vector-ref V 17) 1)))
+
+  (assert (equal? 62 (vector-ref (vector-ref V 29) 1)))
+  (assert (equal? 64 (vector-ref (vector-ref V 31) 2)))
+
+  (assert (equal? 78 (vector-ref (vector-ref V 13) 0)))
+  (assert (equal? 28 (vector-ref (vector-ref V 27) 2)))
+
+  (assert (equal? 9 (vector-ref (vector-ref V 8) 0)))
+  (assert (equal? 17 (vector-ref (vector-ref V 16) 1)))
+
+  (assert (equal? 81 (vector-ref (vector-ref V 16) 0)))
+  (assert (equal? 89 (vector-ref (vector-ref V 24) 1)))
+
+  (assert (equal? 65 (vector-ref (vector-ref V 0) 1)))
+  (assert (equal? 35 (vector-ref (vector-ref V 2) 1)))
+
+  (assert (equal? 33 (vector-ref (vector-ref V 0) 0)))
+  (assert (equal? 66 (vector-ref (vector-ref V 1) 0)))
+
+  (assert (equal? 73 (vector-ref (vector-ref V 8) 2)))
+  (assert (equal? 49 (vector-ref (vector-ref V 16) 2)))
+
   ;; row shuffle
   (for ([i struct-size])
     (let* ([lane (?sw-xform localId warpSize i struct-size)]
@@ -97,10 +131,27 @@
       (set O-cached (@dup i) x))
     )
   
+  (define V1 O-cached)
+  (assert (equal? 1 (vector-ref (vector-ref V1 0) 2)))
+  (assert (equal? 4 (vector-ref (vector-ref V1 1) 2)))
+
+  (assert (equal? 26 (vector-ref (vector-ref V1 8) 1)))
+  (assert (equal? 25 (vector-ref (vector-ref V1 8) 2)))
+
+  (assert (equal? 66 (vector-ref (vector-ref V1 21) 0)))
+  (assert (equal? 72 (vector-ref (vector-ref V1 23) 0)))
+
+  (assert (equal? 95 (vector-ref (vector-ref V1 31) 1)))
+  (assert (equal? 94 (vector-ref (vector-ref V1 31) 2)))
+
+  (assert (equal? (??) (vector-ref (vector-ref V1 17) 0)))
+  (assert (equal? (??) (vector-ref (vector-ref V1 9) 2)))
+  
   ;; column shuffle
   (define O-cached2 (permute-vector O-cached struct-size
                                     (lambda (i) (?sw-xform i struct-size localId warpSize))))
   
+
   (local-to-global O-cached2 O
                       (x-y-z 1)
                       offset
