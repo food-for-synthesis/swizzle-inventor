@@ -398,7 +398,7 @@
 
 ;; Create a local matrix.
 (define (create-matrix-local dims [init (lambda () 0)])
-  (create-matrix (append dims (list blockSize))))
+  (create-matrix (append dims (list blockSize)) init))
 
 ;; Load I in global memory to I-shared in shared memory
 ;; pattern -- (x-y-z stride-x ...)
