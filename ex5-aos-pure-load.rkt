@@ -27,10 +27,9 @@
 
 #lang rosette
 
-
-(require errortrace)
-
 (require "util.rkt" "cuda.rkt" "cuda-synth.rkt")
+
+(output-smt #t) 
 
 (define struct-size 5)
 (define n-block 1)
@@ -75,7 +74,7 @@
 (define (print-vec x)
   (format "#(~a)" (string-join (for/list ([xi x]) (format "~a" xi)))))
 
-;; Sketch that uses column-row-column shuffles.
+;; Sketch that uses column-row-column shuffles. 
 (define (AOS-load-sketch threadId blockID blockDim I O a b c)
   (define I-cached (create-matrix-local (x-y-z struct-size)))
   (define O-cached (create-matrix-local (x-y-z struct-size)))
@@ -159,6 +158,141 @@
                       (x-y-z (* warpSize struct-size)) #f #:round struct-size)
   )
 
+
+;; Sketch that uses column-row-column shuffles.  
+;; This variant synthesizes one pruning rule.
+;; The rule is given by the solution to c1, r1, c2, r2. 
+
+(define-symbolic v1 v2 c1 r1 c2 r2 integer?)
+(define pruning-holes (list v1 v2 c1 r1 c2 r2))
+(define (legal-value? v) 
+  (and (< 0 v) (<= v (* struct-size warpSize))))
+(assert (legal-value? v1))
+(assert (equal? 13 v1))
+(assert (legal-value? v2))
+; (assert (equal? 27 v2)) ; TODO: enabling this leads to no solutions => investigate
+; (assert (distinct? v1 v2))
+(assert (or (distinct? c1 c2)(distinct? r1 r2)))
+(define synth-cond #t) ; for storing the correctness condition 
+
+;; Note: This particular pruning is weaker than what we use.
+;; In particular, this finds partial assignments that are not part of any correct solution. 
+;; That is, it finds a pair of intermediate elements e1=c1,r1 and e2=c2,r2 such that 
+;;  e1,e2 cannot be reached from the source 
+;;    OR 
+;;  e1,e2 cannot reach the target
+;; In contrast, we use only the second condition.
+(define (AOS-load-sketch-prune-failed threadId blockID blockDim I O a b c)
+  (define I-cached (create-matrix-local (x-y-z struct-size)))
+  (define O-cached (create-matrix-local (x-y-z struct-size)))
+  
+  (define localId (modulo (get-x threadId) 32))
+  (define offset (* struct-size (- (+ (* blockID blockDim) (get-x threadId)) localId)))
+  
+  (global-to-local I I-cached
+                 (x-y-z 1)
+                 offset
+                 (x-y-z (* warpSize struct-size)) #f #:round struct-size)
+
+  ;; column shuffle
+  (define I-cached2 (permute-vector I-cached struct-size
+                                    (lambda (i) (?sw-xform i struct-size localId warpSize))))
+
+  
+  ;; 
+  ;; row shuffle
+  ;;
+  (for ([i struct-size])
+    (let* ([lane (?sw-xform localId warpSize i struct-size)]
+           [x (shfl (get I-cached2 (@dup i)) lane)]
+           )
+      (set O-cached (@dup i) x))
+    )
+  
+  (set! synth-cond 
+    (let ([V O-cached])
+      (! (&& 
+                 (equal? 13  (vector-ref (vector-ref V c1) r1))
+                 ; (equal? 27  (vector-ref (vector-ref V c2) r2))
+                 ))))
+
+
+  ;; column shuffle
+  (define O-cached2 (permute-vector O-cached struct-size
+                                    (lambda (i) (?sw-xform i struct-size localId warpSize))))
+  
+
+  (local-to-global O-cached2 O
+                      (x-y-z 1)
+                      offset
+                      (x-y-z (* warpSize struct-size)) #f #:round struct-size)
+  )
+
+
+
+(define (havoc-input-value)
+  (define-symbolic* input integer?)
+  (assert (legal-value? input))
+  input
+  )
+;; Note: This particular pruning is equivalent to what we use. 
+(define (AOS-load-sketch-prune-failed-2 threadId blockID blockDim I O a b c)
+  (define I-cached (create-matrix-local (x-y-z struct-size) havoc-input-value))
+  (define O-cached (create-matrix-local (x-y-z struct-size) havoc-input-value))
+  
+  (define localId (modulo (get-x threadId) 32))
+  (define offset (* struct-size (- (+ (* blockID blockDim) (get-x threadId)) localId)))
+
+  (global-to-local I I-cached
+                 (x-y-z 1)
+                 offset
+                 (x-y-z (* warpSize struct-size)) #f #:round struct-size)
+  
+  ;; column shuffle
+  (define I-cached2 (permute-vector I-cached struct-size
+                                    (lambda (i) (?sw-xform i struct-size localId warpSize))))
+
+  ;; By havocing the intermediate value, the synthesized pruning rule will assume
+  ;; that the traced values (13 and 27) can be supplied in any elements. The synthesis 
+  ;; determines if there is a pair of elements from which 13 and 27 can't reach the target.
+  
+  #;(set! I-cached2 (create-matrix-local (x-y-z struct-size) havoc-input-value))
+  #;(set! synth-cond 
+    (let ([V I-cached2])
+      (! (&& 
+                 (equal? 13  (vector-ref (vector-ref V c1) r1))
+                 (equal? 27  (vector-ref (vector-ref V c2) r2))
+                 ))))
+
+  ;; 
+  ;; row shuffle
+  ;;
+  (for ([i struct-size])
+    (let* ([lane (?sw-xform localId warpSize i struct-size)]
+           [x (shfl (get I-cached2 (@dup i)) lane)]
+           )
+      (set O-cached (@dup i) x))
+    )
+
+  #;(set! O-cached (create-matrix-local (x-y-z struct-size) havoc-input-value))
+  #;(set! synth-cond 
+    (let ([V O-cached])
+      (! (&& 
+                 (equal? 13  (vector-ref (vector-ref V c1) r1))
+                 (equal? 27  (vector-ref (vector-ref V c2) r2))
+                 ))))
+
+  ;; column shuffle
+  (define O-cached2 (permute-vector O-cached struct-size
+                                    (lambda (i) (?sw-xform i struct-size localId warpSize))))
+  
+
+  (local-to-global O-cached2 O
+                      (x-y-z 1)
+                      offset
+                      (x-y-z (* warpSize struct-size)) #f #:round struct-size)
+  )
+
 ;; Sketch that uses row-column-row shuffles.
 (define (AOS-load-rcr-sketch threadId blockID blockDim I O a b c)
   (define I-cached (create-matrix-local (x-y-z struct-size)))
@@ -213,7 +347,52 @@
   (print-forms sol)
   (pretty-display `(cost ,this-cost))
   )
+
+(define (synthesize-pruning)
+  (pretty-display "solving pruning...")
+
+  ; The solutions satisfying these assumptions produce the correct values 
+  ; at the target, assuming that the input is an arbitrary value 
+  ; (see how I-cached is havoced).
+  (define assumptions (with-asserts-only 
+      (assert (andmap (lambda (w) (run-with-warp-size AOS-load-spec 
+                                                  AOS-load-sketch-prune-failed-2
+                                                  w))
+                                           (list 32)))))
+
+  ; the forall symbols for synthesis are 
+  ;   -- holes for the swizzles (we iterate over all possible candidate swizzles), and
+  ;   -- values in the input matrix (this assumes that any value can be supplied) 
+  ; the holes for the pruning rule are kept apart, and are solved in (synthesize)
+
+  (define forall-symbols (remv* pruning-holes (symbolics assumptions)))
+
+  ; The synth-condition is the pruning rule. It is set in `AOS-load-sketch-prune-failed-2`
+  (define sol (time (synthesize #:forall forall-symbols
+                                #:assume (assert (apply && assumptions))
+                                #:guarantee (assert synth-cond)
+                                )))
+  (println sol)
+  ; (print-forms sol)
+  )
+
+(define (verify-pruning)
+  (pretty-display "verifying pruning...")
+  (define-values (cond as) (with-asserts 
+     (andmap (lambda (w) (run-with-warp-size AOS-load-spec 
+                                                  AOS-load-sketch-prune-failed-2 
+                                                  w))
+                                           (list 32))))
+  (define inputs (remv* pruning-holes (symbolics as)))
+  (define sol (time (synthesize #:forall inputs
+                                #:assume (assert (apply && as))
+                                #:guarantee (assert cond)
+                                )))
+  (println sol)
+  ; (print-forms sol)
+  )
+
 (define t0 (current-seconds))
-(synthesis)
+(synthesize-pruning)
 (define t1 (current-seconds))
 (- t1 t0)
